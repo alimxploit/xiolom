@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel | WORMGPT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { background: #0a0a0f; font-family: 'Inter', sans-serif; }
+        .admin-card { background: #111118; border: 1px solid #2a2a35; border-radius: 1.5rem; }
+    </style>
+</head>
+<body class="text-gray-200 p-5">
+    <div class="max-w-5xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold"><i class="fa-solid fa-skull text-emerald-400"></i> WORMGPT Admin</h1>
+            <div class="text-xs bg-red-900/50 px-3 py-1 rounded-full">panel rahasia</div>
+        </div>
+
+        <!-- Login Admin -->
+        <div id="loginBox" class="admin-card p-6 mb-6">
+            <h2 class="text-lg font-bold mb-3">Login Admin</h2>
+            <input type="password" id="adminPass" placeholder="Password" class="bg-black/80 border border-gray-700 rounded-xl px-4 py-2 w-full mb-3">
+            <button id="loginBtn" class="bg-emerald-700 px-5 py-2 rounded-xl w-full">MASUK</button>
+            <div id="loginError" class="text-red-400 text-xs mt-2"></div>
+        </div>
+
+        <!-- Panel Admin (hidden dulu) -->
+        <div id="adminPanel" style="display:none;">
+            <!-- API Settings -->
+            <div class="admin-card p-5 mb-6">
+                <h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-key"></i> API Keys</h2>
+                <div class="mb-3">
+                    <label class="text-xs text-gray-400">DeepSeek API Key</label>
+                    <input type="password" id="dsKeyInput" class="w-full bg-black/80 border border-gray-700 rounded-xl px-4 py-2 text-sm">
+                </div>
+                <div class="mb-3">
+                    <label class="text-xs text-gray-400">Google Gemini API Key</label>
+                    <input type="password" id="geminiKeyInput" class="w-full bg-black/80 border border-gray-700 rounded-xl px-4 py-2 text-sm">
+                </div>
+                <button id="saveApiBtn" class="bg-gray-700 px-4 py-2 rounded-xl text-sm">Simpan API Keys</button>
+                <div id="apiStatus" class="text-xs text-emerald-400 mt-2"></div>
+            </div>
+
+            <!-- Generate User -->
+            <div class="admin-card p-5 mb-6">
+                <h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-user-plus"></i> Generate Kode Aktivasi</h2>
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <input type="text" id="userName" placeholder="Nama User" class="bg-black/80 border border-gray-700 rounded-xl px-4 py-2 text-sm">
+                    <input type="number" id="userCredit" placeholder="Credit (jumlah chat)" value="1000" class="bg-black/80 border border-gray-700 rounded-xl px-4 py-2 text-sm">
+                    <input type="date" id="userExpiry" class="bg-black/80 border border-gray-700 rounded-xl px-4 py-2 text-sm">
+                    <button id="genUserBtn" class="bg-emerald-700 px-4 py-2 rounded-xl text-sm">Generate Kode</button>
+                </div>
+                <div id="genResult" class="text-xs text-amber-400 font-mono"></div>
+            </div>
+
+            <!-- Daftar User -->
+            <div class="admin-card p-5">
+                <h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-users"></i> Daftar User & Kode</h2>
+                <div id="userList" class="space-y-2 max-h-96 overflow-y-auto"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ADMIN_PASSWORD = "xiolimadmin";
+        let users = JSON.parse(localStorage.getItem('worm_users')) || [];
+
+        function saveUsers() { localStorage.setItem('worm_users', JSON.stringify(users)); }
+
+        function renderUsers() {
+            let container = document.getElementById('userList');
+            if (!container) return;
+            if (users.length === 0) {
+                container.innerHTML = '<div class="text-gray-500">Belum ada user</div>';
+                return;
+            }
+            let html = '';
+            users.forEach((user, idx) => {
+                let status = '';
+                if (user.banned) status = '<span class="text-red-400">⛔ BANNED</span>';
+                else if (user.expired) status = '<span class="text-yellow-400">🟡 KADALUARSA</span>';
+                else if (user.used_credit >= user.max_credit) status = '<span class="text-orange-400">💰 CREDIT HABIS</span>';
+                else status = '<span class="text-green-400">✅ AKTIF</span>';
+                
+                html += `
+                    <div class="bg-black/40 p-3 rounded-xl border border-gray-800">
+                        <div class="flex justify-between flex-wrap gap-2">
+                            <div>
+                                <span class="font-bold text-emerald-400">${escapeHtml(user.name)}</span>
+                                <span class="text-xs font-mono ml-2">${user.code}</span>
+                                <div class="text-xs text-gray-400">Credit: ${user.used_credit}/${user.max_credit} | Expired: ${user.expiry_date || 'tidak terbatas'}</div>
+                                <div class="text-xs mt-1">${status}</div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="editUser(${idx})" class="bg-blue-900/50 px-3 py-1 rounded text-xs">✏️ Edit</button>
+                                <button onclick="banUser(${idx})" class="bg-red-900/50 px-3 py-1 rounded text-xs">🚫 Banned</button>
+                                <button onclick="extendUser(${idx})" class="bg-emerald-900/50 px-3 py-1 rounded text-xs">🔄 Perpanjang</button>
+                                <button onclick="deleteUser(${idx})" class="bg-gray-800 px-3 py-1 rounded text-xs">🗑️ Hapus</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        window.editUser = (idx) => {
+            let user = users[idx];
+            let newCredit = prompt(`Edit credit untuk ${user.name} (max ${user.max_credit})`, user.max_credit);
+            let newExpiry = prompt(`Edit expired date (YYYY-MM-DD) atau kosongkan`, user.expiry_date || '');
+            if (newCredit) user.max_credit = parseInt(newCredit);
+            if (newExpiry === '') user.expiry_date = null;
+            else if (newExpiry) user.expiry_date = newExpiry;
+            saveUsers();
+            renderUsers();
+        };
+
+        window.banUser = (idx) => {
+            users[idx].banned = true;
+            saveUsers();
+            renderUsers();
+        };
+
+        window.extendUser = (idx) => {
+            users[idx].banned = false;
+            users[idx].expired = false;
+            users[idx].used_credit = 0;
+            if (!users[idx].expiry_date) {
+                let date = new Date();
+                date.setMonth(date.getMonth() + 12);
+                users[idx].expiry_date = date.toISOString().split('T')[0];
+            }
+            saveUsers();
+            renderUsers();
+        };
+
+        window.deleteUser = (idx) => {
+            if (confirm(`Hapus user ${users[idx].name}?`)) {
+                users.splice(idx, 1);
+                saveUsers();
+                renderUsers();
+            }
+        };
+
+        function generateCode() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789';
+            let seg = () => { let s=''; for(let i=0;i<4;i++) s+=chars[Math.floor(Math.random()*chars.length)]; return s; };
+            return `${seg()}-${seg()}-${seg()}-${seg()}`;
+        }
+
+        document.getElementById('genUserBtn')?.addEventListener('click', () => {
+            let name = document.getElementById('userName').value.trim();
+            let credit = parseInt(document.getElementById('userCredit').value);
+            let expiry = document.getElementById('userExpiry').value;
+            if (!name) { alert('Nama user wajib diisi'); return; }
+            let newCode = generateCode();
+            users.push({
+                code: newCode,
+                name: name,
+                max_credit: credit,
+                used_credit: 0,
+                banned: false,
+                expired: false,
+                expiry_date: expiry || null
+            });
+            saveUsers();
+            document.getElementById('genResult').innerHTML = `✅ Kode untuk ${name}: <span class="bg-black px-2 py-1 rounded">${newCode}</span> <button onclick="navigator.clipboard.writeText('${newCode}')" class="ml-2 text-xs bg-gray-700 px-2 rounded">salin</button>`;
+            renderUsers();
+        });
+
+        document.getElementById('saveApiBtn')?.addEventListener('click', () => {
+            let dsKey = document.getElementById('dsKeyInput').value.trim();
+            let geminiKey = document.getElementById('geminiKeyInput').value.trim();
+            if (dsKey) localStorage.setItem('ds_api_key', dsKey);
+            if (geminiKey) localStorage.setItem('gemini_api_key', geminiKey);
+            document.getElementById('apiStatus').innerHTML = '✅ API keys tersimpan!';
+        });
+
+        // Login logic
+        document.getElementById('loginBtn')?.addEventListener('click', () => {
+            let pass = document.getElementById('adminPass').value;
+            if (pass === ADMIN_PASSWORD) {
+                document.getElementById('loginBox').style.display = 'none';
+                document.getElementById('adminPanel').style.display = 'block';
+                renderUsers();
+            } else {
+                document.getElementById('loginError').innerHTML = 'Password salah!';
+            }
+        });
+
+        function escapeHtml(s) { return s.replace(/[&<>]/g, function(m){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[m]; }); }
+    </script>
+</body>
+</html>
